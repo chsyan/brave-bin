@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+    "flag"
+    "os/exec"
 )
 
 const (
 	latestUrl    string = "https://api.github.com/repos/brave/brave-browser/releases/latest"
 	templateFile string = "template"
 	baseUrl      string = "https://github.com/brave/brave-browser/releases/download/v"
+    voidTemplateFile string = "srcpkgs/brave-bin/template"
 )
 
 func getSha(version string) (string, error) {
@@ -61,7 +64,7 @@ func getContent(url string) ([]byte, error) {
 	return data, nil
 }
 
-func main() {
+func updateTemplate() {
 	version, err := getVersion()
 	if err != nil {
 		log.Printf("Failed to get version: %v", err)
@@ -99,4 +102,70 @@ func main() {
 	}
 
 	fmt.Println("Successfully updated template file")
+}
+
+func updatePackage(voidDir string) {
+	input, err := os.ReadFile(templateFile)
+	if err != nil {
+		log.Printf("Failed to read template file: %v", err)
+		os.Exit(1)
+	}
+	lines := strings.Split(string(input), "\n")
+
+    err = os.Chdir(voidDir)
+    if err != nil {
+        log.Printf("Failed to change directory: %v", err)
+        os.Exit(1)
+    }
+
+	// Write template to file
+	output := strings.Join(lines, "\n")
+	err = os.WriteFile(voidTemplateFile, []byte(output), 0644)
+	if err != nil {
+		log.Printf("Failed to write template file: %v", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Successfully copied template file")
+	fmt.Println("Building brave-bin")
+
+    cmd := exec.Command("./xbps-src", "pkg", "brave-bin")
+    cmd.Stderr = os.Stderr
+    cmd.Stdin = os.Stdin
+    out, err := cmd.Output()
+    if err != nil {
+        fmt.Println(string(out))
+        os.Exit(1)
+    } else {
+	    fmt.Println("Finished building brave-bin")
+    }
+
+    fmt.Println("Installing brave-bin")
+    cmd = exec.Command("xi", "brave-bin")
+    cmd.Stderr = os.Stderr
+    cmd.Stdin = os.Stdin
+    out, err = cmd.Output()
+}
+
+func main() {
+    templatePtr := flag.Bool("t", false, "update template")
+    updatePtr := flag.Bool("u", false, "update void-packages source")
+    home, _ := os.UserHomeDir()
+    defaultPath := fmt.Sprintf("%s/src/void-packages", home)
+    pathPtr := flag.String("p", defaultPath, "path to void-packages directory")
+
+    flag.Parse()
+
+    if !*templatePtr && !*updatePtr {
+        fmt.Println("Please specify one of -t or -u")
+        os.Exit(1)
+    }
+
+    if *templatePtr {
+        updateTemplate()
+    }
+
+    if *updatePtr {
+        updatePackage(*pathPtr)
+    }
 }
